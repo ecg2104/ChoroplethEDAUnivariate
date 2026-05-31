@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Choropleth EDA – Univariate</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #edecea;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 0 14px;
+      height: 44px;
+      background: #fff;
+      border-bottom: 0.5px solid #ddd;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 200;
+    }
+    #toolbar h1 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #222;
+      white-space: nowrap;
+      margin-right: 2px;
+    }
+    .ctrl-group { display: flex; align-items: center; gap: 5px; }
+    .ctrl-label { font-size: 11px; color: #888; white-space: nowrap; }
+
+    select {
+      font-size: 12px;
+      padding: 3px 6px;
+      border: 0.5px solid #ccc;
+      border-radius: 4px;
+      background: #fafafa;
+      color: #222;
+      cursor: pointer;
+      height: 26px;
+    }
+    select:hover { border-color: #999; }
+    select:focus { outline: none; border-color: #4466cc; }
+
+    /* ── Color scheme button ── */
+    #colorBtn {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      height: 26px;
+      padding: 0 7px 0 5px;
+      border: 0.5px solid #ccc;
+      border-radius: 4px;
+      background: #fafafa;
+      cursor: pointer;
+      white-space: nowrap;
+      font-size: 12px;
+      color: #444;
+      user-select: none;
+    }
+    #colorBtn:hover { border-color: #999; background: #f3f3f3; }
+    #colorBtn.open  { border-color: #4466cc; background: #f0f3ff; }
+    #colorBtnSwatches { display: flex; gap: 1.5px; align-items: center; }
+    .btn-swatch { width: 10px; height: 16px; border-radius: 2px; display: inline-block; }
+    #colorBtnChevron { font-size: 9px; color: #888; margin-left: 1px; }
+
+    /* ── Dropdown panel ── */
+    #colorDropdown {
+      display: none;
+      position: absolute;
+      top: 44px;
+      background: #fff;
+      border: 0.5px solid #ddd;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+      padding: 8px 10px 10px;
+      z-index: 999;
+      min-width: 220px;
+    }
+    #colorDropdown.open { display: block; }
+    .dd-family-label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #aaa;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 6px 4px 3px;
+    }
+    .dd-family-label:first-child { padding-top: 2px; }
+    .dd-row {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 3px 4px;
+      border-radius: 5px;
+      cursor: pointer;
+      border: 1.5px solid transparent;
+      margin-bottom: 1px;
+    }
+    .dd-row:hover { background: #f5f5f5; }
+    .dd-row--active { border-color: #4466cc; background: #f0f3ff; }
+    .dd-swatch { flex: 1; height: 14px; border-radius: 2px; }
+    #divergeWarning {
+      display: none;
+      font-size: 10px;
+      color: #9a7000;
+      background: #fffbe6;
+      border: 0.5px solid #ffe58f;
+      border-radius: 4px;
+      padding: 5px 8px;
+      margin-top: 6px;
+      line-height: 1.4;
+    }
+
+    /* ── Clear + status ── */
+    #clearBtn {
+      font-size: 11px;
+      padding: 3px 10px;
+      border: 0.5px solid #ccc;
+      border-radius: 4px;
+      background: #fff;
+      color: #444;
+      cursor: pointer;
+      display: none;
+      height: 26px;
+    }
+    #clearBtn:hover { background: #f4f4f4; }
+    #statusText { font-size: 11px; color: #bbb; margin-left: auto; white-space: nowrap; }
+
+    /* ── Main layout ── */
+    #main {
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* ── Map pane ── */
+    #mapPane {
+      flex: 13;           /* ~65% */
+      background: #dce8f0;
+      border-radius: 8px;
+      border: 0.5px solid #ddd;
+      position: relative;
+      overflow: hidden;
+      min-width: 0;
+    }
+    #mapSvg { display: block; width: 100%; height: 100%; }
+    .tract  { cursor: crosshair; }
+
+    /* ── Floating legend overlay ── */
+    #floatLegend {
+      position: absolute;
+      bottom: 14px;
+      left: 14px;
+      background: rgba(255,255,255,0.93);
+      border: 0.5px solid #ddd;
+      border-radius: 7px;
+      padding: 9px 11px 10px;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      z-index: 10;
+      min-width: 140px;
+      max-width: 200px;
+    }
+    #legendTitle {
+      font-size: 10px;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 6px;
+      line-height: 1.3;
+    }
+    #legendSwatches { display: flex; flex-direction: column; gap: 3px; }
+    .legend-row     { display: flex; align-items: center; gap: 6px; }
+    .legend-swatch  {
+      width: 12px; height: 12px;
+      border-radius: 2px;
+      border: 0.5px solid rgba(0,0,0,0.08);
+      flex-shrink: 0;
+      display: inline-block;
+    }
+    .legend-label { font-size: 10px; color: #555; }
+
+    /* ── Right column — histogram fills it ── */
+    #rightCol {
+      flex: 7;            /* ~35% */
+      min-width: 220px;
+      max-width: 380px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    #histPane {
+      flex: 1;
+      background: #fff;
+      border-radius: 8px;
+      border: 0.5px solid #ddd;
+      overflow: hidden;
+      min-height: 0;
+    }
+    #histSvg { display: block; width: 100%; height: 100%; }
+
+    #histHint {
+      text-align: center;
+      font-size: 10px;
+      color: #888;
+      padding: 5px 0 0;
+      flex-shrink: 0;
+    }
+
+
+    /* ── Stats panel ── */
+    #statsPanel {
+      display: none;
+      background: #fff;
+      border-radius: 8px;
+      border: 0.5px solid #ddd;
+      padding: 10px 12px;
+      flex-shrink: 0;
+      font-size: 11px;
+    }
+    .stats-header {
+      display: grid;
+      grid-template-columns: 68px 1fr 1fr 52px;
+      gap: 2px;
+      margin-bottom: 5px;
+      padding-bottom: 5px;
+      border-bottom: 0.5px solid #eee;
+    }
+    .stats-title {
+      font-size: 10px;
+      font-weight: 700;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      grid-column: 1;
+      align-self: center;
+    }
+    .stats-col-head {
+      font-size: 10px;
+      font-weight: 600;
+      color: #999;
+      text-align: right;
+    }
+    .stats-col-sel { color: #e07b39; }
+    .stats-row {
+      display: grid;
+      grid-template-columns: 68px 1fr 1fr 52px;
+      gap: 2px;
+      padding: 2px 0;
+    }
+    .stats-label {
+      font-size: 10px;
+      color: #888;
+    }
+    .stats-val {
+      font-size: 11px;
+      color: #333;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .stats-col-sel.stats-val { color: #c05f20; font-weight: 500; }
+    .stats-pct {
+      font-size: 10px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      color: #aaa;
+    }
+    .stats-pct.pos { color: #2a7a3b; }
+    .stats-pct.neg { color: #b03030; }
+
+    /* ── Tooltip ── */
+    #tooltip {
+      position: fixed;
+      background: rgba(20,20,20,0.88);
+      color: #fff;
+      font-size: 11px;
+      line-height: 1.6;
+      padding: 6px 10px;
+      border-radius: 5px;
+      pointer-events: none;
+      display: none;
+      z-index: 9999;
+      max-width: 220px;
+    }
+    .tip-group { color: #aaa; }
+    .tip-id    { font-weight: 600; }
+    .tip-label { color: #bbb; font-size: 10px; }
+    .tip-val   { font-weight: 600; font-size: 13px; }
+
+    /* ── Loading overlay ── */
+    #loadingMsg {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.92);
+      font-size: 13px;
+      color: #888;
+      z-index: 100;
+      border-radius: 8px;
+    }
+
+    /* ── D3 brush chrome ── */
+    .selection {
+      fill: rgba(80,120,255,0.08) !important;
+      stroke: #4466cc !important;
+      stroke-width: 1px !important;
+      stroke-dasharray: 4,2 !important;
+    }
+    .handle    { display: none; }
+    .tick text { fill: #888; }
+    .domain    { stroke: #ddd; }
+    .tick line { stroke: #f0f0f0; }
+
+    /* ── Zoom controls ── */
+    #zoomControls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      z-index: 10;
+    }
+    .zoom-btn {
+      width: 28px;
+      height: 28px;
+      background: rgba(255,255,255,0.93);
+      border: 0.5px solid #ccc;
+      border-radius: 5px;
+      font-size: 16px;
+      line-height: 1;
+      color: #444;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      backdrop-filter: blur(4px);
+      user-select: none;
+      transition: background 0.1s;
+    }
+    .zoom-btn:hover { background: #fff; border-color: #999; color: #111; }
+    .zoom-btn:active { background: #eef; }
+    #zoomReset { font-size: 13px; }
+
+
+    /* ── Selection mode indicator ── */
+    #selModeIndicator {
+      position: absolute;
+      bottom: 14px;
+      right: 50px;
+      background: rgba(255,255,255,0.90);
+      border: 0.5px solid #bbb;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 500;
+      color: #4466cc;
+      padding: 3px 9px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.15s;
+      z-index: 15;
+      white-space: nowrap;
+    }
+
+    /* ── Shift-drag hint ── */
+    #shiftHint {
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,0.88);
+      border: 0.5px solid #ddd;
+      border-radius: 4px;
+      font-size: 10px;
+      color: #888;
+      padding: 3px 8px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+      white-space: nowrap;
+      z-index: 10;
+    }
+    #shiftHint.visible { opacity: 1; }
+
+  </style>
+</head>
+<body>
+
+  <!-- Toolbar -->
+  <div id="toolbar">
+    <h1>Choropleth EDA – Univariate</h1>
+
+    <div class="ctrl-group">
+      <label class="ctrl-label" for="varSelect">Variable</label>
+      <select id="varSelect"></select>
+    </div>
+
+    <div class="ctrl-group">
+      <label class="ctrl-label" for="schemeSelect">Classification</label>
+      <select id="schemeSelect">
+        <option value="quantile">Quantile</option>
+        <option value="equal">Equal interval</option>
+      </select>
+    </div>
+
+    <div class="ctrl-group">
+      <label class="ctrl-label" for="bucketSelect">Classes</label>
+      <select id="bucketSelect">
+        <option value="3">3</option>
+        <option value="4">4</option>
+        <option value="5" selected>5</option>
+        <option value="6">6</option>
+        <option value="7">7</option>
+        <option value="8">8</option>
+      </select>
+    </div>
+
+    <div class="ctrl-group">
+      <label class="ctrl-label">Colors</label>
+      <div id="colorBtn" role="button" tabindex="0" aria-haspopup="true">
+        <span id="colorBtnSwatches"></span>
+        <span id="colorBtnChevron">▾</span>
+      </div>
+    </div>
+
+    <div id="colorDropdown">
+      <div id="colorDropdownInner"></div>
+      <div id="divergeWarning">
+        ⚠ Diverging schemes work best when the variable has a meaningful midpoint (e.g. % change, z-score).
+      </div>
+    </div>
+
+    <button id="clearBtn">✕ Clear selection</button>
+    <span id="statusText"></span>
+  </div>
+
+  <!-- Main -->
+  <div id="main">
+
+    <!-- Map with floating legend -->
+    <div id="mapPane">
+      <div id="loadingMsg">Loading data…</div>
+      <svg id="mapSvg"></svg>
+
+      <!-- Zoom controls -->
+      <div id="zoomControls">
+        <button class="zoom-btn" id="zoomIn"    title="Zoom in">+</button>
+        <button class="zoom-btn" id="zoomOut"   title="Zoom out">−</button>
+        <button class="zoom-btn" id="zoomReset" title="Reset view">⊙</button>
+      </div>
+
+      <!-- Selection mode indicator -->
+      <div id="selModeIndicator"></div>
+
+      <!-- Shift-drag hint (shown briefly on first zoom) -->
+      <div id="shiftHint">Shift+drag: lasso · Shift+Alt+drag: rectangle</div>
+
+      <!-- Floating legend overlay -->
+      <div id="floatLegend">
+        <div id="legendTitle"></div>
+        <div id="legendSwatches"></div>
+      </div>
+    </div>
+
+    <!-- Right column: histogram fills full height -->
+    <div id="rightCol">
+      <div id="histPane">
+        <svg id="histSvg"></svg>
+      </div>
+      <div id="statsPanel"></div>
+      <div id="histHint">Drag histogram to filter map &nbsp;·&nbsp; Shift+drag map: lasso &nbsp;·&nbsp; Shift+Alt+drag: rectangle</div>
+    </div>
+
+  </div>
+
+  <div id="tooltip"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
